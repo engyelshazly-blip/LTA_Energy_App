@@ -1,14 +1,13 @@
 import math
-
 from constants import MINOR_AXIS_RATIO
 
 
-def throat_diameter(wt_diameter, clearance):
-    return wt_diameter + 2 * clearance
+def throat_diameter(wt_diameter, clearance_per_side):
+    return wt_diameter + 2 * clearance_per_side
 
 
 def chord_length(dth, c_dth):
-    return c_dth * dth
+    return dth * c_dth
 
 
 def minor_axis(chord):

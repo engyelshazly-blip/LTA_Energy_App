@@ -11,6 +11,7 @@ from calculations import (
 from constants import (
     DEFAULT_C_DTH,
     DEFAULT_CLEARANCE,
+    AIR_DENSITY_DEFAULT,
     DEFAULT_RATED_POWER_KW,
     DEFAULT_CP,
     DEFAULT_GENERATOR_EFFICIENCY,
@@ -67,7 +68,7 @@ with st.sidebar:
     st.markdown('<div class="sidebar-title">🌍 Site Conditions</div>', unsafe_allow_html=True)
     altitude = st.number_input("Altitude (m)", value=150.0)
     wind_speed = st.number_input("Wind Speed at Altitude (m/s)", value=7.0)
-    air_density = st.number_input("Air Density (kg/m³)", value=1.22)
+    air_density = st.number_input("Air Density (kg/m³)", value=AIR_DENSITY_DEFAULT)
 
     st.markdown('<div class="sidebar-title">⚙️ Wind Turbine</div>', unsafe_allow_html=True)
     rotor_diameter = st.number_input("WT Diameter (m)", value=4.30)
@@ -77,20 +78,10 @@ with st.sidebar:
     st.markdown('<div class="sidebar-title">⚡ Energy Yield Inputs</div>', unsafe_allow_html=True)
     rated_power_kw = st.number_input("Rated Power (kW)", value=DEFAULT_RATED_POWER_KW)
     cp = st.number_input("Power Coefficient Cp", value=DEFAULT_CP)
-    generator_efficiency = st.number_input(
-        "Generator Efficiency",
-        value=DEFAULT_GENERATOR_EFFICIENCY
-    )
-    capacity_factor = st.number_input(
-        "Capacity Factor",
-        value=DEFAULT_CAPACITY_FACTOR
-    )
+    generator_efficiency = st.number_input("Generator Efficiency", value=DEFAULT_GENERATOR_EFFICIENCY)
+    capacity_factor = st.number_input("Capacity Factor", value=DEFAULT_CAPACITY_FACTOR)
 
-    st.markdown('<div class="sidebar-title">🎈 Elliptical Shroud Material</div>', unsafe_allow_html=True)
-    shell_material_density = st.number_input(
-        "Shell Material Mass per Area (kg/m²)",
-        value=0.203
-    )
+    st.markdown('<div class="sidebar-title">🎈 Buoyancy</div>', unsafe_allow_html=True)
     safety_factor = st.number_input("Buoyancy Safety Factor", value=0.80)
 
     calculate = st.button("🧮 Calculate Elliptical Shroud", use_container_width=True)
@@ -106,7 +97,6 @@ inputs = {
     "rotor_diameter": rotor_diameter,
     "clearance": clearance,
     "turbine_mass": turbine_mass,
-    "shell_material_density": shell_material_density,
     "safety_factor": safety_factor,
     "rated_power_kw": rated_power_kw,
     "cp": cp,
@@ -127,29 +117,23 @@ row = st.session_state["design"]
 curve_df = pd.DataFrame(st.session_state["curve"])
 energy_curve_df = pd.DataFrame(st.session_state["energy_curve"])
 
-safe_df = curve_df[curve_df["Uplift / Total Mass Ratio"] < 1]
+safe_df = curve_df[curve_df["Uplift / Total Mass Ratio"] >= 1]
 
 if not safe_df.empty:
-    recommended_safe = safe_df.iloc[
-        (safe_df["Uplift / Total Mass Ratio"] - 1).abs().argsort()[:1]
-    ].iloc[0]
+    optimum = safe_df.iloc[0]
 else:
-    recommended_safe = None
+    optimum = None
 
-if recommended_safe is not None:
-    optimum_cdth = recommended_safe["C/Dth"]
-    optimum_ratio = recommended_safe["Uplift / Total Mass Ratio"]
-    recommended_cdth_text = f"{optimum_cdth:.2f}"
-    recommended_ratio_text = f"Ratio = {optimum_ratio:.3f}"
-    recommended_status = "SAFE"
-    recommended_status_class = "safe"
+if optimum is not None:
+    optimum_cdth = optimum["C/Dth"]
+    optimum_ratio = optimum["Uplift / Total Mass Ratio"]
+    optimum_status = "SAFE"
+    optimum_status_class = "safe"
 else:
     optimum_cdth = "-"
     optimum_ratio = "-"
-    recommended_cdth_text = "-"
-    recommended_ratio_text = "No safe ratio below unity"
-    recommended_status = "NO SAFE VALUE"
-    recommended_status_class = "not-safe"
+    optimum_status = "NO SAFE VALUE"
+    optimum_status_class = "not-safe"
 
 st.subheader("📊 Design Summary")
 st.success("Calculation completed successfully.")
@@ -177,8 +161,8 @@ c3, c4 = st.columns(2)
 with c3:
     st.markdown(f"""
     <div class="card">
-        <div class="card-title">⚖️ Total System Mass</div>
-        <div class="card-value">{row["Total Mass (kg)"]:,} kg</div>
+        <div class="card-title">⚖️ Supported Mass</div>
+        <div class="card-value">{row["Supported Mass (kg)"]:,} kg</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -186,13 +170,11 @@ with c4:
     st.markdown(f"""
     <div class="card">
         <div class="card-title">🎈 Optimum C/Dth Ratio</div>
-        <div class="card-value">{recommended_cdth_text}</div>
-        <div class="{recommended_status_class}">{recommended_status}</div>
-        <div>{recommended_ratio_text}</div>
+        <div class="card-value">{optimum_cdth}</div>
+        <div class="{optimum_status_class}">{optimum_status}</div>
+        <div>Ratio = {optimum_ratio}</div>
     </div>
     """, unsafe_allow_html=True)
-
-st.write("")
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📐 Geometry",
@@ -211,9 +193,9 @@ with tab1:
             "Clearance per Side",
             "Throat Diameter",
             "Optimum C/Dth Ratio",
-            "Chord Length at Optimum C/Dth",
-            "Elliptical Minor Axis at Optimum C/Dth",
-            "Shell Diameter at Optimum C/Dth",
+            "Chord Length",
+            "Elliptical Minor Axis",
+            "Shell Diameter",
             "Cross-section Area",
             "Shell Volume",
             "Ellipse h",
@@ -224,7 +206,8 @@ with tab1:
         ],
         "Value": [
             row["WT Diameter (m)"],
-            row.get("Clearance per Side (m)", row.get("Clearance Ratio", clearance)),            row["Throat Diameter (m)"],
+            row["Clearance per Side (m)"],
+            row["Throat Diameter (m)"],
             optimum_cdth,
             row["Chord Length (m)"],
             row["Elliptical Minor Axis (m)"],
@@ -255,7 +238,8 @@ with tab2:
             "Shroud Mass",
             "Tether Mass",
             "Turbine Mass",
-            "Total Mass"
+            "Supported Mass",
+            "Total Mass Including Gas"
         ],
         "Mass (kg)": [
             row["Gas Mass (kg)"],
@@ -263,7 +247,8 @@ with tab2:
             row["Shroud Mass (kg)"],
             row["Tether Mass (kg)"],
             row["Turbine Mass (kg)"],
-            row["Total Mass (kg)"]
+            row["Supported Mass (kg)"],
+            row["Total Mass Including Gas (kg)"]
         ]
     })
 
@@ -277,7 +262,7 @@ with tab3:
             "Buoyancy Force",
             "Total Uplift",
             "Uplift After Safety Factor",
-            "Total System Mass",
+            "Supported Mass",
             "Mass Margin",
             "Uplift / Total Mass Ratio"
         ],
@@ -285,7 +270,7 @@ with tab3:
             row["Buoyancy Force (N)"],
             row["Total Uplift (kg)"],
             row["Uplift After Safety Factor (kg)"],
-            row["Total Mass (kg)"],
+            row["Supported Mass (kg)"],
             row["Mass Margin (kg)"],
             row["Uplift / Total Mass Ratio"],
         ],
@@ -298,7 +283,7 @@ with tab3:
 
 with tab4:
     st.subheader("Uplift / Total Mass Ratio vs C/Dth")
-    st.write("The optimum value is the last safe C/Dth before the ratio reaches unity.")
+    st.write("The optimum value is the first C/Dth where the ratio reaches unity.")
 
     fig = go.Figure()
 
@@ -318,12 +303,12 @@ with tab4:
         line=dict(width=2, dash="dash")
     ))
 
-    if recommended_safe is not None:
+    if optimum is not None:
         fig.add_trace(go.Scatter(
-            x=[recommended_safe["C/Dth"]],
-            y=[recommended_safe["Uplift / Total Mass Ratio"]],
+            x=[optimum["C/Dth"]],
+            y=[optimum["Uplift / Total Mass Ratio"]],
             mode="markers",
-            name="Optimum Safe C/Dth",
+            name="Optimum C/Dth",
             marker=dict(size=18, symbol="star", color="green")
         ))
 
@@ -347,13 +332,11 @@ with tab4:
 
     st.plotly_chart(fig, use_container_width=True)
 
-    if recommended_safe is not None:
+    if optimum is not None:
         st.success(
-            f"Optimum safe C/Dth = {recommended_safe['C/Dth']:.2f} "
-            f"with ratio = {recommended_safe['Uplift / Total Mass Ratio']:.3f}"
+            f"Optimum C/Dth = {optimum['C/Dth']:.2f}, "
+            f"ratio = {optimum['Uplift / Total Mass Ratio']:.3f}"
         )
-    else:
-        st.warning("No safe C/Dth value was found below unity.")
 
 with tab5:
     st.subheader("Bare WT vs Elliptical Shrouded WT Energy Yield")
@@ -380,14 +363,7 @@ with tab5:
             row["Energy Gain (%)"]
         ],
         "Unit": [
-            "m/s",
-            "-",
-            "m/s",
-            "kW",
-            "kW",
-            "kWh/year",
-            "kWh/year",
-            "%"
+            "m/s", "-", "m/s", "kW", "kW", "kWh/year", "kWh/year", "%"
         ]
     })
 
@@ -432,6 +408,6 @@ with tab5:
     st.plotly_chart(fig_energy, use_container_width=True)
 
     st.info(
-        "The elliptical shrouded WT uses an effective throat wind speed "
-        f"equal to {ELLIPSE_THROAT_VELOCITY_FACTOR} × the free-stream wind speed."
+        f"The elliptical shrouded WT uses {ELLIPSE_THROAT_VELOCITY_FACTOR} × "
+        "the free-stream wind speed."
     )
