@@ -4,7 +4,7 @@ from constants import MINOR_AXIS_RATIO
 
 
 def throat_diameter(wt_diameter, clearance):
-    return wt_diameter * (1 + clearance)
+    return wt_diameter + 2 * clearance
 
 
 def chord_length(dth, c_dth):
@@ -33,6 +33,7 @@ def ellipse_h(chord, b):
 
 def ellipse_perimeter(chord, b):
     h = ellipse_h(chord, b)
+
     return math.pi * ((b + chord) / 2) * (
         1 + (3 * h) / (10 + math.sqrt(4 - 3 * h))
     )
