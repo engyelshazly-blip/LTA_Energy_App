@@ -1,9 +1,12 @@
+import math
+
 from constants import (
     GRAVITY,
     HELIUM_DENSITY,
     DEFAULT_C_DTH,
     WING_AREA_RATIO,
     FABRIC_MASS_G_M2,
+    ELLIPSE_THROAT_VELOCITY_FACTOR,
 )
 
 from geometry import (
@@ -19,14 +22,35 @@ from geometry import (
 )
 
 
+def turbine_power_kw(
+    wind_speed,
+    rotor_diameter,
+    air_density,
+    cp,
+    generator_efficiency,
+    rated_power_kw
+):
+    rotor_area = math.pi * (rotor_diameter / 2) ** 2
+    available_power_w = 0.5 * air_density * rotor_area * wind_speed ** 3
+    output_power_kw = available_power_w * cp * generator_efficiency / 1000
+
+    return min(output_power_kw, rated_power_kw)
+
+
 def calculate_design(inputs, c_dth=DEFAULT_C_DTH):
     wt_diameter = inputs["rotor_diameter"]
     clearance = inputs["clearance"]
     altitude = inputs["altitude"]
+    wind_speed = inputs["wind_speed"]
     air_density = inputs["air_density"]
     turbine_mass = inputs["turbine_mass"]
     shell_material_density = inputs["shell_material_density"]
     safety_factor = inputs["safety_factor"]
+
+    rated_power_kw = inputs["rated_power_kw"]
+    cp = inputs["cp"]
+    generator_efficiency = inputs["generator_efficiency"]
+    capacity_factor = inputs["capacity_factor"]
 
     dth = throat_diameter(wt_diameter, clearance)
     chord = chord_length(dth, c_dth)
@@ -48,24 +72,47 @@ def calculate_design(inputs, c_dth=DEFAULT_C_DTH):
     uplift = total_uplift * safety_factor
 
     gas_mass = HELIUM_DENSITY * volume
-    wing_mass = (wing_sa * FABRIC_MASS_G_M2) / 1000
-    shroud_mass = (shroud_sa * FABRIC_MASS_G_M2) / 1000
+    wing_mass = wing_sa * FABRIC_MASS_G_M2 / 1000
+    shroud_mass = shroud_sa * FABRIC_MASS_G_M2 / 1000
     tether_mass = altitude * shell_material_density * 3
 
-    total_mass = (
-        gas_mass
-        + wing_mass
-        + shroud_mass
-        + tether_mass
-        + turbine_mass
+    total_mass = gas_mass + wing_mass + shroud_mass + tether_mass + turbine_mass
+
+    uplift_mass_ratio = uplift / total_mass
+    mass_margin = uplift - total_mass
+
+    effective_shrouded_speed = wind_speed * ELLIPSE_THROAT_VELOCITY_FACTOR
+
+    bare_power_kw = turbine_power_kw(
+        wind_speed,
+        wt_diameter,
+        air_density,
+        cp,
+        generator_efficiency,
+        rated_power_kw
     )
 
-    ratio = uplift / total_mass
-    mass_margin = uplift - total_mass
+    shrouded_power_kw = turbine_power_kw(
+        effective_shrouded_speed,
+        wt_diameter,
+        air_density,
+        cp,
+        generator_efficiency,
+        rated_power_kw
+    )
+
+    bare_aey = bare_power_kw * 8760 * capacity_factor
+    shrouded_aey = shrouded_power_kw * 8760 * capacity_factor
+
+    energy_gain_percent = (
+        ((shrouded_aey - bare_aey) / bare_aey) * 100
+        if bare_aey > 0
+        else 0
+    )
 
     return {
         "C/Dth": round(c_dth, 3),
-        "Clearance Ratio": round(clearance, 3),
+        "Clearance per Side (m)": round(clearance, 3),
         "WT Diameter (m)": round(wt_diameter, 3),
         "Throat Diameter (m)": round(dth, 3),
         "Chord Length (m)": round(chord, 3),
@@ -78,6 +125,7 @@ def calculate_design(inputs, c_dth=DEFAULT_C_DTH):
         "Shroud Surface Area (m²)": round(shroud_sa, 3),
         "Wing Surface Area (m²)": round(wing_sa, 3),
         "System Surface Area (m²)": round(system_sa, 3),
+
         "Buoyancy Force (N)": round(buoyancy_force, 3),
         "Total Uplift (kg)": round(total_uplift, 3),
         "Uplift After Safety Factor (kg)": round(uplift, 3),
@@ -88,7 +136,15 @@ def calculate_design(inputs, c_dth=DEFAULT_C_DTH):
         "Turbine Mass (kg)": round(turbine_mass, 3),
         "Total Mass (kg)": round(total_mass, 3),
         "Mass Margin (kg)": round(mass_margin, 3),
-        "Uplift / Total Mass Ratio": round(ratio, 3),
+        "Uplift / Total Mass Ratio": round(uplift_mass_ratio, 3),
+
+        "Free-stream Wind Speed (m/s)": round(wind_speed, 3),
+        "Effective Shrouded Wind Speed (m/s)": round(effective_shrouded_speed, 3),
+        "Bare WT Power (kW)": round(bare_power_kw, 3),
+        "Elliptical Shrouded WT Power (kW)": round(shrouded_power_kw, 3),
+        "Bare WT Annual Energy Yield (kWh/year)": round(bare_aey, 3),
+        "Elliptical Shrouded WT Annual Energy Yield (kWh/year)": round(shrouded_aey, 3),
+        "Energy Gain (%)": round(energy_gain_percent, 3),
     }
 
 
@@ -106,6 +162,53 @@ def calculate_parametric_curve(inputs):
             "Total Mass (kg)": result["Total Mass (kg)"],
             "Shell Volume (m³)": result["Shell Volume (m³)"],
             "Shroud Surface Area (m²)": result["Shroud Surface Area (m²)"],
+        })
+
+    return results
+
+
+def calculate_energy_yield_curve(inputs):
+    results = []
+
+    wt_diameter = inputs["rotor_diameter"]
+    air_density = inputs["air_density"]
+    rated_power_kw = inputs["rated_power_kw"]
+    cp = inputs["cp"]
+    generator_efficiency = inputs["generator_efficiency"]
+    capacity_factor = inputs["capacity_factor"]
+
+    for i in range(0, 26):
+        free_speed = float(i)
+        shrouded_speed = free_speed * ELLIPSE_THROAT_VELOCITY_FACTOR
+
+        bare_power_kw = turbine_power_kw(
+            free_speed,
+            wt_diameter,
+            air_density,
+            cp,
+            generator_efficiency,
+            rated_power_kw
+        )
+
+        shrouded_power_kw = turbine_power_kw(
+            shrouded_speed,
+            wt_diameter,
+            air_density,
+            cp,
+            generator_efficiency,
+            rated_power_kw
+        )
+
+        bare_energy = bare_power_kw * 8760 * capacity_factor
+        shrouded_energy = shrouded_power_kw * 8760 * capacity_factor
+
+        results.append({
+            "Free-stream Wind Speed (m/s)": free_speed,
+            "Effective Shrouded Wind Speed (m/s)": round(shrouded_speed, 3),
+            "Bare WT Power (kW)": round(bare_power_kw, 3),
+            "Elliptical Shrouded WT Power (kW)": round(shrouded_power_kw, 3),
+            "Bare WT Annual Energy Yield (kWh/year)": round(bare_energy, 3),
+            "Elliptical Shrouded WT Annual Energy Yield (kWh/year)": round(shrouded_energy, 3),
         })
 
     return results
